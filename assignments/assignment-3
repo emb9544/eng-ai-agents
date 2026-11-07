@@ -1976,12 +1976,12 @@
         ")\n"
       ],
       "metadata": {
-        "id": "5jyfgwCBJ8Oc",
-        "outputId": "7fb5123d-e813-4139-e5a5-3bece7639b1f",
         "colab": {
           "base_uri": "https://localhost:8080/",
           "height": 354
-        }
+        },
+        "id": "5jyfgwCBJ8Oc",
+        "outputId": "7fb5123d-e813-4139-e5a5-3bece7639b1f"
       },
       "id": "5jyfgwCBJ8Oc",
       "execution_count": 173,
@@ -2517,7 +2517,7 @@
       "source": [
         "It is reasonable to model the drone's size with a random walk because its bounding-box width and height do not usually change at a constant rate. Changes in size can result from perspective, distance, or detector noise, so adding velocity terms for width and height could make the model unnecessarily complicated.\n",
         "\n",
-        "One situation where the constant-velocity assumption becomes inaccurate is when a drone suddenly changes direction or passes behind an obstacle. The Kalman filter initially predicts the next position using the previous velocity. When a valid detection becomes available, it corrects the prediction through a measurement update. If no detection passes the gate, the filter continues predicting temporarily before declaring the track lost."
+        "One situation where the constant-velocity assumption becomes inaccurate is when a drone suddenly changes direction or passes behind an obstacle. The Kalman filter initially predicts its next position using the previous velocity. When a valid detection becomes available, it corrects the prediction through a measurement update. If no detection passes the gate, the filter continues predicting temporarily before declaring the track lost."
       ]
     },
     {
@@ -2553,11 +2553,11 @@
         "id": "cell-44"
       },
       "source": [
-        "When `accel_std` is much smaller than `meas_std`, the filter has a lower Kalman gain and trusts its motion predictions more than the detector. This helps smooth out jittery detections but can cause the tracker to lag behind a fast-moving drone. In my sweep, `accel_std=1` and `meas_std=30` produced an AUC of 0.543 and P@20 of 0.755.\n",
+        "When `accel_std` is much smaller than `meas_std`, the Kalman filter has a lower gain and trusts its motion predictions more than the detector. This helps reduce jitter from noisy detections but can cause the tracker to lag behind a fast-moving drone that suddenly changes direction. In my sweep, `accel_std=1` and `meas_std=30` produced an AUC of 0.629 and P@20 of 0.840.\n",
         "\n",
-        "When `accel_std` is much larger than `meas_std`, the Kalman gain increases, causing the filter to trust the detector measurements more. This helps it react to sudden changes in motion, but it can also introduce errors when the detector is jittery. For example, `accel_std=25` and `meas_std=3` produced an AUC of 0.605 and P@20 of 0.791.\n",
+        "When `accel_std` is much larger than `meas_std`, the Kalman gain increases, making the filter trust detector measurements more. This allows it to respond faster to sudden movements but can also introduce errors from jittery detections. For example, `accel_std=25` and `meas_std=3` produced an AUC of 0.630 and P@20 of 0.838.\n",
         "\n",
-        "The highest overall AUC in my sweep was 0.610 with `accel_std=25` and `meas_std=10`, showing that the best performance came from balancing motion uncertainty with measurement noise rather than trusting only one source."
+        "The scores changed only slightly across the nine configurations, ranging from approximately 0.629 to 0.632 AUC. This is partly because my final tracker relies heavily on detector measurements when producing bounding boxes. Based on the odd-numbered sequences, the selected noise settings were `accel_std=6` and `meas_std=10`, with an overall AUC of approximately 0.631."
       ]
     },
     {
@@ -2593,11 +2593,11 @@
         "id": "cell-46"
       },
       "source": [
-        "The detector-only method had an absent-box rate of 0.9867, while my Kalman tracker had a slightly higher rate of 0.9908. This means my tracker reported more bounding boxes when the drone was absent, likely because of coasting predictions and false reacquisitions from low-confidence detections.\n",
+        "The detector-only method had an absent-box rate of 0.9867, while my updated Kalman tracker achieved a slightly lower rate of 0.9684. This means my tracker reduced incorrect bounding-box predictions when the drone was absent, although the rate remains high.\n",
         "\n",
-        "My tracker uses a coasting limit of 2 frames, allowing it to continue predicting during short missed detections, such as when the drone temporarily passes behind a tree. However, if the drone leaves the frame, continuing to predict can produce false bounding boxes.\n",
+        "My tracker uses a coasting limit of 2 frames, allowing the Kalman filter to continue predicting during short periods without an accepted detection, such as when a drone passes behind a tree. However, my final implementation suppresses the predicted output when no valid detector measurement is available. This helps avoid reporting boxes during missing detections but can also reduce tracking continuity.\n",
         "\n",
-        "A stricter Mahalanobis gate reduces incorrect detection matches but may reject the real drone during sudden movements. A looser gate improves the chance of maintaining the track but increases the risk of matching a false detection. The challenge is balancing tracking continuity with avoiding false positives."
+        "A stricter Mahalanobis gate reduces incorrect matches but may reject the actual drone when it moves unexpectedly. A looser gate allows more detections to be accepted but increases the risk of matching the wrong object. When the drone leaves the frame completely, longer coasting and aggressive reacquisition can produce false positives, so the tracker must balance continuity with accuracy."
       ]
     },
     {
@@ -2633,9 +2633,11 @@
         "id": "cell-48"
       },
       "source": [
-        "I selected `video13` because it had the lowest Kalman tracker AUC of 0.017, compared to 0.066 for the detector alone. Based on the tracking timeline, the filter follows the drone during roughly the first 50 frames but then loses its correct position. Later, around frames 438–440 and 464–469, the detector successfully identifies the drone while the Kalman tracker continues reporting an incorrect position.\n",
+        "I selected `video13` because it had the lowest Kalman tracker AUC of approximately 0.066, which was the same as the detector-only method. This shows that although my updated tracker met the minimum requirement, it did not significantly improve tracking accuracy on this difficult sequence.\n",
         "\n",
-        "This suggests a combination of detection and tracking problems. The detector already performs poorly on this sequence, but the tracker also fails to recover when useful detections become available. A better motion model might help with sudden movements, but improving the detection matching and reacquisition logic is also necessary."
+        "In the rendered video samples, the drone appears very small against a building background. Around frames 639, 1277, and 1915, the tracking box covers large sections of the building instead of tightly following the drone. The estimated trajectory also shows incorrect movement across the background.\n",
+        "\n",
+        "This suggests that the main problem is unreliable detection and localization. A better motion model could help when the drone changes direction, but it would not completely solve the problem because the detector is sometimes providing incorrect bounding boxes. Improving detection quality and rejecting false measurements would likely be more effective."
       ]
     },
     {
@@ -2655,14 +2657,6 @@
       "source": [
         "**Question 5. Where the numbers come from.** The 424 training and validation images that are frames of the tracking videos were held out of training. Other detection images may still come from the same sites as the tracking videos, filmed at another time. What does that mean for how far you would trust these tracking scores on video from a new site? Would it change the comparison between the detector alone and the detector with the filter, and why?"
       ]
-    },
-    {
-      "cell_type": "markdown",
-      "source": [],
-      "metadata": {
-        "id": "VIU37naDGL_K"
-      },
-      "id": "VIU37naDGL_K"
     },
     {
       "cell_type": "markdown",
@@ -2719,7 +2713,15 @@
         "id": "9791930e"
       },
       "source": [
-        "*Your answer here.*"
+        "My tracker declares the drone lost after more than 2 consecutive frames without an accepted detection. During those frames, the Kalman filter continues predicting the drone's position, but my final implementation does not output a predicted box unless a sufficiently confident detection is available. Once the track is declared lost, the active filter is discarded and the tracker attempts to initialize a new track.\n",
+        "\n",
+        "My reacquisition rule allows the tracker to restart immediately when a detection has confidence of at least 0.10. Weaker detections with confidence of at least 0.05 require 3 consecutive spatially consistent observations. I also implemented detector-assisted recovery, which can restart the filter after 2 consistent alternative detections when the current prediction disagrees with the detector.\n",
+        "\n",
+        "On `video13`, reacquisition increased the AUC from 0.0029 without the rule to 0.0660 with the rule. Across all 20 sequences, overall AUC increased from 0.3197 without reacquisition to 0.6307 with reacquisition. Precision@20 also improved from 0.4374 to 0.8383.\n",
+        "\n",
+        "However, reacquisition came with a major trade-off. The absent-box rate increased from 0.1171 without reacquisition to 0.9684 with reacquisition. This shows that the rule improves tracking continuity but also produces many false bounding boxes when the drone is absent. My detector-assisted recovery also relies heavily on detector measurements, so the improvement cannot be attributed entirely to the Kalman motion model.\n",
+        "\n",
+        "The video13 timeline comparison illustrates this difference: without reacquisition, the tracker loses the drone for much of the sequence, while the recovery-enabled version continues producing detections throughout the video."
       ]
     }
   ],
